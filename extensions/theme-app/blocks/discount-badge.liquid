@@ -1,0 +1,141 @@
+{% comment %}
+  Display a discount badge for products that have quantity discounts configured
+{% endcomment %}
+
+{%- liquid
+  assign product_gid = product.id | prepend: 'gid://shopify/Product/'
+  assign discount_config = shop.metafields.volume_discount.rules
+  assign found_discount = false
+  assign discount_percentage = 0
+-%}
+
+{% if discount_config.value %}
+  {% for item in discount_config.value %}
+    {% if item.productId == product_gid %}
+      {% assign found_discount = true %}
+      {% assign discount_percentage = item.discountPercentage %}
+      {% break %}
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+{% if found_discount and discount_percentage > 0 %}
+  <div class="discount-badge" style="
+    background: {{ block.settings.background_color }};
+    color: {{ block.settings.text_color }};
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+    font-size: {{ block.settings.font_size }}px;
+    font-weight: {{ block.settings.font_weight }};
+    text-align: {{ block.settings.text_alignment }};
+    {% if block.settings.show_border %}
+      border: 2px solid {{ block.settings.border_color }};
+    {% endif %}
+  ">
+    {% if block.settings.show_icon %}
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="display: inline-block; vertical-align: middle; margin-right: 8px;">
+        <path d="M10 2L12 7H17L13 10L14 15L10 12L6 15L7 10L3 7H8L10 2Z" fill="currentColor"/>
+      </svg>
+    {% endif %}
+    {% assign badge_text_output = block.settings.badge_text | replace: '{percentOff}', discount_percentage %}
+    {{ badge_text_output }}
+  </div>
+{% endif %}
+
+{% schema %}
+{
+  "name": "Discount Badge",
+  "target": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "badge_text",
+      "label": "Badge Text",
+      "default": "Buy 2, get {percentOff}% off",
+      "info": "Use {percentOff} as a placeholder for the discount percentage"
+    },
+    {
+      "type": "color",
+      "id": "background_color",
+      "label": "Background Color",
+      "default": "#FFF4E6"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "Text Color",
+      "default": "#B95000"
+    },
+    {
+      "type": "range",
+      "id": "font_size",
+      "min": 12,
+      "max": 24,
+      "step": 1,
+      "unit": "px",
+      "label": "Font Size",
+      "default": 16
+    },
+    {
+      "type": "select",
+      "id": "font_weight",
+      "label": "Font Weight",
+      "options": [
+        {
+          "value": "normal",
+          "label": "Normal"
+        },
+        {
+          "value": "bold",
+          "label": "Bold"
+        },
+        {
+          "value": "600",
+          "label": "Semi Bold"
+        }
+      ],
+      "default": "600"
+    },
+    {
+      "type": "select",
+      "id": "text_alignment",
+      "label": "Text Alignment",
+      "options": [
+        {
+          "value": "left",
+          "label": "Left"
+        },
+        {
+          "value": "center",
+          "label": "Center"
+        },
+        {
+          "value": "right",
+          "label": "Right"
+        }
+      ],
+      "default": "left"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_border",
+      "label": "Show Border",
+      "default": true
+    },
+    {
+      "type": "color",
+      "id": "border_color",
+      "label": "Border Color",
+      "default": "#FFD699"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_icon",
+      "label": "Show Icon",
+      "default": true
+    }
+  ]
+}
+{% endschema %}
+
