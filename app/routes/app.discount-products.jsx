@@ -92,6 +92,82 @@ export async function action({ request }) {
   const formData = await request.formData();
   const actionType = formData.get("action");
 
+  if (actionType === "delete") {
+    const productIdToRemove = formData.get("productId");
+    console.log('Action - Deleting product:', productIdToRemove);
+
+    // Fetch current discount data
+    const response = await admin.graphql(
+      `#graphql
+        query getDiscountProducts {
+          shop {
+            metafield(namespace: "volume_discount", key: "rules") {
+              value
+            }
+          }
+        }`
+    );
+
+    const responseData = await response.json();
+    const savedDiscounts = responseData.data.shop.metafield?.value
+      ? JSON.parse(responseData.data.shop.metafield.value)
+      : [];
+
+    // Filter out the product to remove
+    const updatedDiscounts = savedDiscounts.filter(d => d.productId !== productIdToRemove);
+    console.log('Action - Updated discounts after removal:', JSON.stringify(updatedDiscounts, null, 2));
+
+    // Get shop GID
+    const shopQuery = await admin.graphql(
+      `#graphql
+        query {
+          shop {
+            id
+          }
+        }`
+    );
+
+    const shopData = await shopQuery.json();
+    const shopGid = shopData.data.shop.id;
+
+    // Update metafield with remaining discounts
+    const updateResponse = await admin.graphql(
+      `#graphql
+        mutation setDiscountProducts($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields {
+              id
+              namespace
+              key
+              value
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }`,
+      {
+        variables: {
+          metafields: [
+            {
+              namespace: "volume_discount",
+              key: "rules",
+              type: "json",
+              value: JSON.stringify(updatedDiscounts),
+              ownerId: shopGid
+            }
+          ]
+        }
+      }
+    );
+
+    const result = await updateResponse.json();
+    console.log('Action - Delete result:', JSON.stringify(result, null, 2));
+
+    return data({ success: true, deleted: true });
+  }
+
   if (actionType === "save") {
     const discountData = JSON.parse(formData.get("discountData"));
     console.log('Action - Saving discount data:', JSON.stringify(discountData, null, 2));
@@ -335,8 +411,15 @@ export default function DiscountProducts() {
   }, [selectedProducts]);
 
   const handleRemoveProduct = useCallback((productId) => {
+    // Remove from local state
     setSelectedProducts(selectedProducts.filter(p => p.id !== productId));
-  }, [selectedProducts]);
+
+    // Submit delete action to remove from metafields
+    const formData = new FormData();
+    formData.append("action", "delete");
+    formData.append("productId", productId);
+    submit(formData, { method: "post" });
+  }, [selectedProducts, submit]);
 
   const handleDiscountChange = useCallback((productId, value) => {
     setSelectedProducts(selectedProducts.map(p =>
