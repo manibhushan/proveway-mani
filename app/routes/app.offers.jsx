@@ -79,7 +79,13 @@ export default function Offers() {
   const { offers } = useLoaderData();
 
   return (
-    <Page title="Offers">
+    <Page
+      title="Offers"
+      primaryAction={{
+        content: "Create offer",
+        url: "/app/discount-products",
+      }}
+    >
       <Layout>
         <Layout.Section>
           <Banner>
