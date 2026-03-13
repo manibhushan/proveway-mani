@@ -36,11 +36,22 @@ export async function loader({ request }) {
   const responseData = await response.json();
   console.log('Loader - Raw response:', JSON.stringify(responseData, null, 2));
 
-  const savedDiscounts = responseData.data.shop.metafield?.value
-    ? JSON.parse(responseData.data.shop.metafield.value)
-    : [];
+  const rawValue = responseData.data.shop.metafield?.value;
+  let savedDiscounts = [];
+  let endsAt = null;
+
+  if (rawValue) {
+    const parsed = JSON.parse(rawValue);
+    if (Array.isArray(parsed)) {
+      savedDiscounts = parsed;
+    } else if (parsed?.rules) {
+      savedDiscounts = parsed.rules;
+      endsAt = parsed.endsAt || parsed.expiresAt || null;
+    }
+  }
 
   console.log('Loader - Saved discounts:', JSON.stringify(savedDiscounts, null, 2));
+  console.log('Loader - Discount endsAt:', endsAt);
 
   // Fetch product details if we have saved discounts
   let products = [];
@@ -82,8 +93,10 @@ export async function loader({ request }) {
         minQuantity: discount?.minQuantity || 2
       };
     });
-  }  console.log('Loader - Final products:', JSON.stringify(products, null, 2));
-  return data({ products, savedDiscounts });
+  }
+
+  console.log('Loader - Final products:', JSON.stringify(products, null, 2));
+  return data({ products, savedDiscounts, endsAt });
 }
 
 // Action - Save selected products
