@@ -1,4 +1,10 @@
-import { useLoaderData } from "react-router";
+import { useState, useEffect } from "react";
+import {
+  useLoaderData,
+  useActionData,
+  useSubmit,
+  useNavigation,
+} from "react-router";
 import {
   Page,
   Layout,
@@ -9,6 +15,9 @@ import {
   Text,
   Banner,
   EmptyState,
+  TextField,
+  Button,
+  InlineStack,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 
@@ -75,8 +84,110 @@ export async function loader({ request }) {
   return { offers };
 }
 
+export async function action({ request }) {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const offerData = JSON.parse(formData.get("offers") || "[]");
+
+  // Get shop GID
+  const shopQuery = await admin.graphql(
+    `#graphql
+      query {
+        shop {
+          id
+        }
+      }`
+  );
+
+  const shopData = await shopQuery.json();
+  const shopGid = shopData.data.shop.id;
+
+  // Update metafield
+  const response = await admin.graphql(
+    `#graphql
+      mutation setDiscountProducts($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            namespace
+            key
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }`,
+    {
+      variables: {
+        metafields: [
+          {
+            namespace: "volume_discount",
+            key: "rules",
+            type: "json",
+            value: JSON.stringify(offerData),
+            ownerId: shopGid,
+          },
+        ],
+      },
+    }
+  );
+
+  const result = await response.json();
+  const hasErrors =
+    result.data?.metafieldsSet?.userErrors?.length > 0 ||
+    result.errors?.length > 0;
+
+  return { success: !hasErrors, errors: result.data?.metafieldsSet?.userErrors };
+}
+
 export default function Offers() {
   const { offers } = useLoaderData();
+  const actionData = useActionData();
+  const navigation = useNavigation();
+  const submit = useSubmit();
+
+  const [localOffers, setLocalOffers] = useState(offers);
+  const [showSuccessBanner, setShowSuccessBanner] = useState(false);
+
+  useEffect(() => {
+    setLocalOffers(offers);
+  }, [offers]);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccessBanner(true);
+      const timer = setTimeout(() => setShowSuccessBanner(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionData]);
+
+  const isSaving = navigation.state === "submitting";
+
+  const updateOffer = (id, fields) => {
+    setLocalOffers((current) =>
+      current.map((offer) =>
+        offer.id === id ? { ...offer, ...fields } : offer
+      )
+    );
+  };
+
+  const removeOffer = (id) => {
+    setLocalOffers((current) => current.filter((offer) => offer.id !== id));
+  };
+
+  const saveOffers = () => {
+    const payload = localOffers.map((offer) => ({
+      productId: offer.id,
+      discountPercentage: Number(offer.discountPercentage) || 0,
+      minQuantity: Number(offer.minQuantity) || 2,
+    }));
+
+    const formData = new FormData();
+    formData.append("offers", JSON.stringify(payload));
+    submit(formData, { method: "post" });
+  };
 
   return (
     <Page
@@ -85,6 +196,14 @@ export default function Offers() {
         content: "Create offer",
         url: "/app/discount-products",
       }}
+      secondaryActions={[
+        {
+          content: "Save",
+          onAction: saveOffers,
+          disabled: localOffers.length === 0,
+          loading: isSaving,
+        },
+      ]}
     >
       <Layout>
         <Layout.Section>
@@ -93,9 +212,17 @@ export default function Offers() {
           </Banner>
         </Layout.Section>
 
+        {showSuccessBanner && (
+          <Layout.Section>
+            <Banner tone="success" onDismiss={() => setShowSuccessBanner(false)}>
+              <p>Offers saved successfully.</p>
+            </Banner>
+          </Layout.Section>
+        )}
+
         <Layout.Section>
           <Card>
-            {offers.length === 0 ? (
+            {localOffers.length === 0 ? (
               <EmptyState
                 heading="No offers found"
                 action={{
@@ -111,7 +238,7 @@ export default function Offers() {
             ) : (
               <ResourceList
                 resourceName={{ singular: "offer", plural: "offers" }}
-                items={offers}
+                items={localOffers}
                 renderItem={(item) => {
                   const {
                     id,
@@ -135,14 +262,12 @@ export default function Offers() {
                       media={media}
                       accessibilityLabel={`View details for ${title}`}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                        }}
+                      <InlineStack
+                        align="space-between"
+                        blockAlign="center"
+                        wrap={false}
                       >
-                        <div>
+                        <div style={{ flex: 1 }}>
                           <Text variant="bodyMd" fontWeight="bold" as="h3">
                             {title}
                           </Text>
@@ -150,14 +275,42 @@ export default function Offers() {
                             {priceRangeV2?.minVariantPrice?.amount} {" "}
                             {priceRangeV2?.minVariantPrice?.currencyCode}
                           </Text>
-                          <Text variant="bodySm" tone="subdued">
-                            Min Quantity: {minQuantity}
-                          </Text>
                         </div>
-                        <Text as="p" fontWeight="bold">
-                          {discountPercentage}% off
-                        </Text>
-                      </div>
+
+                        <TextField
+                          label="Discount %"
+                          type="number"
+                          value={String(discountPercentage || 0)}
+                          onChange={(value) =>
+                            updateOffer(id, { discountPercentage: value })
+                          }
+                          suffix="%"
+                          min={0}
+                          max={100}
+                          autoComplete="off"
+                          style={{ width: 140 }}
+                        />
+
+                        <TextField
+                          label="Min Quantity"
+                          type="number"
+                          value={String(minQuantity || 2)}
+                          onChange={(value) =>
+                            updateOffer(id, { minQuantity: value })
+                          }
+                          min={1}
+                          autoComplete="off"
+                          style={{ width: 140 }}
+                        />
+
+                        <Button
+                          plain
+                          destructive
+                          onClick={() => removeOffer(id)}
+                        >
+                          Remove
+                        </Button>
+                      </InlineStack>
                     </ResourceItem>
                   );
                 }}
