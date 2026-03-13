@@ -36,9 +36,20 @@ export async function loader({ request }) {
   );
 
   const responseData = await response.json();
-  const savedOffers = responseData.data.shop.metafield?.value
-    ? JSON.parse(responseData.data.shop.metafield.value)
-    : [];
+
+  const rawValue = responseData.data.shop.metafield?.value;
+  let savedOffers = [];
+  let endsAt = null;
+
+  if (rawValue) {
+    const parsed = JSON.parse(rawValue);
+    if (Array.isArray(parsed)) {
+      savedOffers = parsed;
+    } else if (parsed?.rules) {
+      savedOffers = parsed.rules;
+      endsAt = parsed.endsAt || parsed.expiresAt || null;
+    }
+  }
 
   let offers = [];
 
@@ -81,7 +92,7 @@ export async function loader({ request }) {
     });
   }
 
-  return { offers };
+  return { offers, endsAt };
 }
 
 export async function action({ request }) {
