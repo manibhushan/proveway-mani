@@ -403,7 +403,7 @@ export default function DiscountProducts() {
   const actionData = useActionData();
   const navigation = useNavigation();
   const submit = useSubmit();
-  const [selectedProducts, setSelectedProducts] = useState(products);
+  const [selectedProducts, setSelectedProducts] = useState();
   const [expiryDate, setExpiryDate] = useState(
     endsAt ? new Date(endsAt).toISOString().slice(0, 10) : ""
   );
