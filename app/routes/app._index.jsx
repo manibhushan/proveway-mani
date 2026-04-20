@@ -46,7 +46,7 @@ export const action = async ({ request }) => {
     },
   );
   const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
+  const created = responseJson.data.productCreate.product;
   const variantId = product.variants.edges[0].node.id;
   const variantResponse = await admin.graphql(
     `#graphql

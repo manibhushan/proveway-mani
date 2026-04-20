@@ -36,11 +36,22 @@ export async function loader({ request }) {
   const responseData = await response.json();
   console.log('Loader - Raw response:', JSON.stringify(responseData, null, 2));
 
-  const savedDiscounts = responseData.data.shop.metafield?.value
-    ? JSON.parse(responseData.data.shop.metafield.value)
-    : [];
+  const rawValue = responseData.data.shop.metafield?.value;
+  let savedDiscounts = [];
+  let endsAt = null;
+
+  if (rawValue) {
+    const parsed = JSON.parse(rawValue);
+    if (Array.isArray(parsed)) {
+      savedDiscounts = parsed;
+    } else if (parsed?.rules) {
+      savedDiscounts = parsed.rules;
+      endsAt = parsed.endsAt || parsed.expiresAt || null;
+    }
+  }
 
   console.log('Loader - Saved discounts:', JSON.stringify(savedDiscounts, null, 2));
+  console.log('Loader - Discount endsAt:', endsAt);
 
   // Fetch product details if we have saved discounts
   let products = [];
@@ -82,8 +93,10 @@ export async function loader({ request }) {
         minQuantity: discount?.minQuantity || 2
       };
     });
-  }  console.log('Loader - Final products:', JSON.stringify(products, null, 2));
-  return data({ products, savedDiscounts });
+  }
+
+  console.log('Loader - Final products:', JSON.stringify(products, null, 2));
+  return data({ products, savedDiscounts, endsAt });
 }
 
 // Action - Save selected products
@@ -109,9 +122,19 @@ export async function action({ request }) {
     );
 
     const responseData = await response.json();
-    const savedDiscounts = responseData.data.shop.metafield?.value
-      ? JSON.parse(responseData.data.shop.metafield.value)
-      : [];
+    const rawValue = responseData.data.shop.metafield?.value;
+    let savedDiscounts = [];
+    let endsAt = null;
+
+    if (rawValue) {
+      const parsed = JSON.parse(rawValue);
+      if (Array.isArray(parsed)) {
+        savedDiscounts = parsed;
+      } else if (parsed?.rules) {
+        savedDiscounts = parsed.rules;
+        endsAt = parsed.endsAt || parsed.expiresAt || null;
+      }
+    }
 
     // Filter out the product to remove
     const updatedDiscounts = savedDiscounts.filter(d => d.productId !== productIdToRemove);
@@ -130,7 +153,7 @@ export async function action({ request }) {
     const shopData = await shopQuery.json();
     const shopGid = shopData.data.shop.id;
 
-    // Update metafield with remaining discounts
+    // Update metafield with remaining discounts (preserve expiry if present)
     const updateResponse = await admin.graphql(
       `#graphql
         mutation setDiscountProducts($metafields: [MetafieldsSetInput!]!) {
@@ -154,7 +177,7 @@ export async function action({ request }) {
               namespace: "volume_discount",
               key: "rules",
               type: "json",
-              value: JSON.stringify(updatedDiscounts),
+              value: JSON.stringify({ rules: updatedDiscounts, endsAt }),
               ownerId: shopGid
             }
           ]
@@ -170,7 +193,9 @@ export async function action({ request }) {
 
   if (actionType === "save") {
     const discountData = JSON.parse(formData.get("discountData"));
+    const endsAt = formData.get("endsAt") || null;
     console.log('Action - Saving discount data:', JSON.stringify(discountData, null, 2));
+    console.log('Action - Discount expires at:', endsAt);
 
     // First, get the shop's GID
     const shopQuery = await admin.graphql(
@@ -210,7 +235,7 @@ export async function action({ request }) {
               namespace: "volume_discount",
               key: "rules",
               type: "json",
-              value: JSON.stringify(discountData),
+              value: JSON.stringify({ rules: discountData, endsAt }),
               ownerId: shopGid
             }
           ]
@@ -314,6 +339,7 @@ export async function action({ request }) {
                 title: "Quantity Discount",
                 functionId: functionId,
                 startsAt: new Date().toISOString(),
+                ...(endsAt ? { endsAt: new Date(endsAt).toISOString() } : {}),
               },
             },
           }
@@ -348,6 +374,7 @@ export async function action({ request }) {
                 title: "Quantity Discount",
                 functionId: functionId,
                 startsAt: new Date().toISOString(),
+                ...(endsAt ? { endsAt: new Date(endsAt).toISOString() } : {}),
               },
             },
           }
@@ -372,11 +399,14 @@ export async function action({ request }) {
 
 // Component
 export default function DiscountProducts() {
-  const { products } = useLoaderData();
+  const { products, endsAt } = useLoaderData();
   const actionData = useActionData();
   const navigation = useNavigation();
   const submit = useSubmit();
-  const [selectedProducts, setSelectedProducts] = useState(products);
+  const [selectedProducts, setSelectedProducts] = useState();
+  const [expiryDate, setExpiryDate] = useState(
+    endsAt ? new Date(endsAt).toISOString().slice(0, 10) : ""
+  );
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
 
   const isLoading = navigation.state === "submitting";
@@ -388,6 +418,14 @@ export default function DiscountProducts() {
       return () => clearTimeout(timer);
     }
   }, [actionData]);
+
+  useEffect(() => {
+    setSelectedProducts(products);
+  }, [products]);
+
+  useEffect(() => {
+    setExpiryDate(endsAt ? new Date(endsAt).toISOString().slice(0, 10) : "");
+  }, [endsAt]);
 
   const handleProductSelection = useCallback(async () => {
     const selected = await shopify.resourcePicker({
@@ -436,9 +474,10 @@ export default function DiscountProducts() {
     const formData = new FormData();
     formData.append("action", "save");
     formData.append("discountData", JSON.stringify(discountData));
+    formData.append("endsAt", expiryDate ?? "");
 
     submit(formData, { method: "post" });
-  }, [selectedProducts, submit]);
+  }, [selectedProducts, submit, expiryDate]);
 
   return (
     <Page
@@ -468,6 +507,25 @@ export default function DiscountProducts() {
           <Banner>
             <p>Select products that will receive automatic discounts when added to cart. Discount applies only when quantity is 2 or more.</p>
           </Banner>
+        </Layout.Section>
+
+        <Layout.Section>
+          <InlineStack gap="4" align="baseline">
+            <TextField
+              label="Discount expires on"
+              type="date"
+              value={expiryDate}
+              onChange={setExpiryDate}
+              placeholder="YYYY-MM-DD"
+            />
+            <Button
+              plain
+              onClick={() => setExpiryDate("")}
+              disabled={!expiryDate}
+            >
+              Clear
+            </Button>
+          </InlineStack>
         </Layout.Section>
 
         <Layout.Section>
