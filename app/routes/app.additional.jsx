@@ -14,10 +14,8 @@ export default function AdditionalPage() {
           .
         </s-paragraph>
         <s-paragraph>
-          To create your own page and have it show up in the app navigation, add
-          a page inside <code>app/routes</code>, and a link to it in the{" "}
-          <code>&lt;ui-nav-menu&gt;</code> component found in{" "}
-          <code>app/routes/app.jsx</code>.
+          To create a page have it show up in the app navigation, add
+          a page inside <code>
         </s-paragraph>
       </s-section>
       <s-section slot="aside" heading="Resources">
